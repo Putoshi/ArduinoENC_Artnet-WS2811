@@ -1,3 +1,4 @@
+
 /*
 This Project will receive multiple universes via Artnet and control a strip of ws2811 leds via 
 Adafruit's NeoPixel library: https://github.com/adafruit/Adafruit_NeoPixel
@@ -19,8 +20,15 @@ This Code is written for Maximum FPS and Ram saving, some tweeks are still in pr
 #include "src/Mod_Adafruit_NeoPixel/Adafruit_NeoPixel.h" // Library for Led protocol
 
 // Ethernet Librarys
-#include <UIPEthernet.h>
-#include <UIPUdp.h>
+/* for Ethernet Shield V1 */ //セットのオンボードのやつはこちら
+ #include <Ethernet.h>
+ #include <EthernetUdp.h>
+
+/* for Ethernet Shield V2 */
+//#include <Ethernet2.h>
+//#include <EthernetUdp2.h> 
+
+#define UDP_TX_PACKET_MAX_SIZE 128
 
 // Artnet Specific
 #define ART_NET_PORT 6454       // UDP specific
@@ -30,15 +38,12 @@ This Code is written for Maximum FPS and Ram saving, some tweeks are still in pr
 #define ART_DMX_START 18        // Artnet LED Offset
 
 // Led Data
-#define NUMLEDS 171 // Number of LEDs per Universe/Output + 18 Byte Artnet Header
+#define NUMLEDS 144 // Number of LEDs per Universe/Output + 18 Byte Artnet Header
 #define DATAPIN1 2  // Output Pin 1th Universe
 #define DATAPIN2 4  // Output Pin 2nd Universe
 
-// Select Arduino's IP, MAC and Universe configuration. Prepared for 5 Arduinos
-#define ARDUINO_NR 1  // Define Arduino Number 1, 2, 3, 4, 5
-
 // Frames per second counter, uncomment for statistics
-//#define FPS_COUNTER
+#define FPS_COUNTER
 
 /*  
  *  To connect Resistors in Data line without external pcb, these Pins are bend away from the shield.
@@ -53,45 +58,16 @@ uint8_t artnetHeader[ART_DMX_START];
 uint16_t packetSize;
 
 // Neopixel Initialization
-Adafruit_NeoPixel leds1 = Adafruit_NeoPixel(NUMLEDS, DATAPIN1, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel leds1 = Adafruit_NeoPixel(NUMLEDS, DATAPIN1, NEO_GRBW + NEO_KHZ800);
+Adafruit_NeoPixel ledsBuff = Adafruit_NeoPixel(NUMLEDS, 8, NEO_GRB + NEO_KHZ800);
 
 // Arduino Selection change IPs, MACs and Universe to you needs
  
-// 1th Arduino Nano
-#if ARDUINO_NR == 1
-  #define STARTUNIVERSE 0
-  #define SECONDUNIVERSE STARTUNIVERSE+1
-  IPAddress ip(192, 168, 0, 100);
-  byte mac[] = {0x04, 0xE9, 0xE5, 0x00, 0x00, 0xEC};
+#define STARTUNIVERSE 0
+#define SECONDUNIVERSE STARTUNIVERSE+1
+IPAddress ip(192, 168, 0, 62);
+byte mac[] = { 0xDE, 0xAF, 0x3E, 0xEF, 0xF1, 0xAD};//{0x90, 0xA2, 0xDA, 0x10, 0xC3, 0xF9};
 
-// 2nd Arduino Nano
-#elif ARDUINO_NR == 2
-  #define STARTUNIVERSE 2
-  #define SECONDUNIVERSE STARTUNIVERSE+1
-  IPAddress ip(192, 168, 0, 102);
-  byte mac[] = {0x04, 0xE9, 0xE5, 0x00, 0x02, 0xEC};
-
-// 3th Arduino Nano
-#elif ARDUINO_NR == 3
-  #define STARTUNIVERSE 4
-  #define SECONDUNIVERSE STARTUNIVERSE+1
-  IPAddress ip(192, 168, 0, 104);
-  byte mac[] = {0x04, 0xE9, 0xE5, 0x00, 0x04, 0xEC};
-
-// 4th Arduino Nano
-#elif ARDUINO_NR == 4
-  #define STARTUNIVERSE 6
-  #define SECONDUNIVERSE STARTUNIVERSE+1
-  IPAddress ip(192, 168, 0, 106);
-  byte mac[] = {0x04, 0xE9, 0xE5, 0x00, 0x06, 0xEC};
- 
-// 5th Arduino Nano
-#elif ARDUINO_NR == 5
-  #define STARTUNIVERSE 8
-  #define SECONDUNIVERSE STARTUNIVERSE+1
-  IPAddress ip(192, 168, 0, 108);
-  byte mac[] = {0x04, 0xE9, 0xE5, 0x00, 0x08, 0xEC};
-#endif
 
 void setup()
 {
@@ -128,7 +104,7 @@ void loop()
             && artnetHeader[4] == 'N' && artnetHeader[5] == 'e' && artnetHeader[6] == 't') {
         if ((artnetHeader[8] | artnetHeader[9]) << 8 == ART_DMX)
         {
-          udp.read(leds1.getPixels(),artnetHeader[17] | artnetHeader[16] << 8); // Size of universe = artnetHeader[17] | artnetHeader[16] << 8
+          udp.read(ledsBuff.getPixels(),artnetHeader[17] | artnetHeader[16] << 8); // Size of universe = artnetHeader[17] | artnetHeader[16] << 8
           
           switch (artnetHeader[14] | artnetHeader[15] << 8) { // Universe
             case (STARTUNIVERSE):
@@ -139,8 +115,31 @@ void loop()
               break;
             default: 
               break;
-            }     
+            }
 
+          for (int i = 0 ; i < NUMLEDS ; i++) {
+            uint32_t _color = ledsBuff.getPixelColor(i);
+            uint8_t _R = getRedValueFromColor(_color);
+            uint8_t _G = getGreenValueFromColor(_color);
+            uint8_t _B = getBlueValueFromColor(_color);
+
+            
+            float wr = (float)getRedValueFromColor(_color)/255;
+            wr = wr * wr * wr;
+            float wg = (float)getGreenValueFromColor(_color)/255;
+            wg = wg*wg*wg;
+            float wb = (float)getBlueValueFromColor(_color)/255;
+            wb = wb*wb*wb;
+            float w = (wr+wg+wb)/3;
+
+            // 白っぽくなりすぎるので調整
+            w = w * w * w * w;
+            
+            int _W = w*255;
+
+            leds1.setPixelColor(i, _R, _G, _B , _W); //RGB
+          }
+          
           leds1.show();
         };
       }
@@ -152,26 +151,38 @@ void loop()
   #endif
 }
 
+uint8_t getRedValueFromColor(uint32_t c) {
+    return c >> 8 & 255;
+}
+
+uint8_t getGreenValueFromColor(uint32_t c) {
+    return c >> 16 & 255;
+}
+
+uint8_t getBlueValueFromColor(uint32_t c) {
+    return c & 255;
+}
+
 
 // LED Testing Pattern
 void initTest()
 {
   for (int i = 0 ; i < NUMLEDS ; i++)
-    leds1.setPixelColor(i, 127, 0, 0);
+    leds1.setPixelColor(i, 127, 0, 0, 255);
   leds1.setPin(DATAPIN1);
   leds1.show();
   leds1.setPin(DATAPIN2);
   leds1.show();
   delay(500);
   for (int i = 0 ; i < NUMLEDS ; i++)
-    leds1.setPixelColor(i, 0, 127, 0);
+    leds1.setPixelColor(i, 0, 127, 0, 255);
   leds1.setPin(DATAPIN1);
   leds1.show();
   leds1.setPin(DATAPIN2);
   leds1.show();
   delay(500);
   for (int i = 0 ; i < NUMLEDS ; i++)
-    leds1.setPixelColor(i, 0, 0, 127);
+    leds1.setPixelColor(i, 0, 0, 127, 255);
   leds1.setPin(DATAPIN1);
   leds1.show();
   leds1.setPin(DATAPIN2);
